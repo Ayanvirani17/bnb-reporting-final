@@ -1,175 +1,194 @@
 "use client"
 
-import { useState } from 'react'
-import * as XLSX from 'xlsx'
-import { supabase } from '@/lib/supabaseClient'
+import React, { useState } from "react"
+import * as XLSX from "xlsx"
+import { getSupabaseClient } from "@/lib/supabaseClient"
+
+type PreviewRow = {
+  accountName: string
+  debit: number
+  credit: number
+}
 
 export default function AdminPage() {
-  const [period, setPeriod] = useState('')
-  const [data, setData] = useState<any[]>([])
-  const [status, setStatus] = useState('')
-  const [logs, setLogs] = useState<string[]>([])
+  const [period, setPeriod] = useState<string>("")
+  const [previewRows, setPreviewRows] = useState<PreviewRow[]>([])
+  const [status, setStatus] = useState<string>("")
+  const [isUploading, setIsUploading] = useState(false)
 
-  const log = (msg: string) => setLogs(prev => [...prev, msg])
-
-  const handleFileUpload = (e: any) => {
-    const file = e.target.files[0]
+  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setStatus(\`Reading \${file.name}...\`)
     const reader = new FileReader()
     reader.onload = (evt) => {
-      const bstr = evt.target?.result
-      const wb = XLSX.read(bstr, { type: 'binary' })
-      const ws = wb.Sheets[wb.SheetNames[0]]
-      // Header is on row 6 (range: 5)
-      const json = XLSX.utils.sheet_to_json(ws, { range: 5, defval: 0 })
-      setData(json)
-      log(`✅ File loaded. ${json.length} rows found`)
+      try {
+        const data = evt.target?.result
+        if (!data) throw new Error("No file data")
+        const workbook = XLSX.read(data, { type: "array" })
+        const sheet = workbook.Sheets[workbook.SheetNames[0]]
+
+        // Header is on row 6 in your sample -> range: 5 (0-based)
+        const rows: any[] = XLSX.utils.sheet_to_json(sheet, { range: 5, defval: "" })
+
+        const parsed: PreviewRow[] = rows
+          .map((r) => ({
+            accountName: String(r["Account Name"] ?? r["Account"] ?? "").trim(),
+            debit: Number(r["Debit"] ?? 0) || 0,
+            credit: Number(r["Credit"] ?? 0) || 0,
+          }))
+          .filter((r) => r.accountName && !/total/i.test(r.accountName) && r.accountName.toLowerCase() !== "difference")
+
+        setPreviewRows(parsed)
+        setStatus(\`Parsed \${parsed.length} rows from \${file.name}\`)
+      } catch (err: any) {
+        console.error(err)
+        setStatus("Failed to parse file: " + (err?.message ?? err))
+      }
     }
-    reader.readAsBinaryString(file)
+    reader.readAsArrayBuffer(file)
   }
 
-  const smartMap = (name: string) => {
-    const n = name.toLowerCase()
-    if (n.includes('sale') || n.includes('income') || n.includes('service charge')) 
-      return { cat: 'Revenue', line: 'Sales Revenue', sign: 'credit' }
-    if (n.includes('purchases') || n.includes('cost of') || n.includes('raw material') || n.includes('food') || n.includes('beverage'))
-      return { cat: 'COGS', line: 'Direct Costs', sign: 'debit' }
-    if (n.includes('wage') || n.includes('salary') || n.includes('staff'))
-      return { cat: 'Opex', line: 'Staff Costs', sign: 'debit' }
-    if (n.includes('rent') || n.includes('utility') || n.includes('electricity') || n.includes('water'))
-      return { cat: 'Opex', line: 'Rent & Utilities', sign: 'debit' }
-    return { cat: 'Opex', line: 'General Admin', sign: 'debit' }
-  }
+  async function uploadToDatabase() {
+    if (!period) return setStatus("Please enter a period (e.g., March 2026)")
+    if (previewRows.length === 0) return setStatus("No rows to upload — please upload and preview a file first.")
 
-  const uploadToDatabase = async () => {
-    if (!period || data.length === 0) { 
-        setStatus('❌ Please enter a period and choose a file.')
-        return 
-    }
-    setLogs([])
-    setStatus('Processing trial balance...')
+    const supabase = getSupabaseClient()
+    if (!supabase) return setStatus("Supabase client not available. Check env vars in Vercel.")
 
     try {
-      // 1. Get Entity ID (Picking the latest one we created)
-      const { data: ent } = await supabase.from('entities').select('id').order('created_at', {ascending: false}).limit(1)
-      const entityId = ent?.[0]?.id
-      if (!entityId) throw new Error("Entity not found")
-
-      // 2. Create Trial Balance
-      const { data: tb, error: tbErr } = await supabase
-        .from('trial_balances')
-        .insert([{ entity_id: entityId, period_name: period }])
+      setIsUploading(true)
+      setStatus("Creating trial balance record...")
+      const { data: tbData, error: tbError } = await supabase
+        .from("trial_balances")
+        .insert([{ period, created_at: new Date().toISOString() }])
         .select()
-      
-      const tbId = tb?.[0]?.id || (await supabase.from('trial_balances').select('id').order('id', {ascending:false}).limit(1)).data?.[0].id
-      log('✅ Trial Balance record created')
+        .limit(1)
+      if (tbError) throw tbError
+      const trial_balance_id = tbData?.[0]?.id ?? null
 
-      // 3. Load Mappings
-      const { data: mapping } = await supabase.from('account_mapping').select('*')
+      setStatus("Uploading trial balance lines...")
+      const formattedLines = previewRows.map((r) => ({
+        trial_balance_id,
+        account_code: null,
+        account_name: r.accountName,
+        debit: r.debit,
+        credit: r.credit,
+      }))
 
-      // 4. Build and Insert Lines
-      const filtered = data.filter((row: any) => 
-        row['Account Name'] && 
-        row['Account Name'] !== 'Totals' && 
-        row['Account Name'] !== 'Difference'
-      )
+      const { error: linesError } = await supabase.from("trial_balance_lines").insert(formattedLines)
+      if (linesError) throw linesError
 
-      const lines = filtered.map((row: any) => {
-        const name = row['Account Name']
-        const debit = parseFloat(row['Debit']) || 0
-        const credit = parseFloat(row['Credit']) || 0
-        const map = mapping?.find(m => m.account_name === name) || smartMap(name)
-        const sign = map.sign_convention || map.sign
-        
-        // Final Amount calculation based on P&L sign convention
-        const amount = sign === 'credit' ? (credit - debit) : (debit - credit)
-        
-        return {
-          trial_balance_id: tbId,
-          account_name: name,
-          debit,
-          credit,
-          amount,
-          pl_category: map.pl_category || map.cat,
-          pl_line_item: map.pl_line_item || map.line
-        }
-      })
+      setStatus("Generating P&L...")
+      await generatePLFromLines(supabase, trial_balance_id, period, previewRows)
 
-      const { error: lineErr } = await supabase.from('trial_balance_lines').insert(lines)
-      if (lineErr) throw lineErr
-      log(`✅ ${lines.length} account lines saved`)
-
-      // 5. Generate P&L results summary
-      const summary: any = {}
-      lines.forEach(l => {
-        const key = `${l.pl_category}|${l.pl_line_item}`
-        summary[key] = (summary[key] || 0) + l.amount
-      })
-
-      const plResults = Object.keys(summary).map(key => {
-        const [cat, line] = key.split('|')
-        return { period, pl_category: cat, pl_line_item: line, amount: summary[key] }
-      })
-
-      const { error: plErr } = await supabase.from('pl_results').insert(plResults)
-      if (plErr) throw plErr
-
-      log('✅ P&L summary generated')
-      setStatus(`SUCCESS! ${period} reports are live.`)
-
+      setStatus(\`SUCCESS: P&L generated for \${period}\`)
     } catch (err: any) {
       console.error(err)
-      log('❌ ERROR: ' + err.message)
-      setStatus('Failed at: ' + err.message)
+      setStatus("Upload failed: " + (err?.message ?? JSON.stringify(err)))
+    } finally {
+      setIsUploading(false)
     }
+  }
+
+  async function generatePLFromLines(supabase: any, trial_balance_id: string | null, periodVal: string, rows: PreviewRow[]) {
+    const { data: mappings, error: mapErr } = await supabase.from("account_mapping").select("*")
+    if (mapErr) {
+      console.warn("account_mapping fetch error:", mapErr)
+    }
+
+    function findMapping(accountName: string) {
+      if (!mappings) return null
+      return mappings.find((m: any) => {
+        if (m.account_code && String(m.account_code) === String(accountName)) return true
+        if (!m.account_code && accountName.toLowerCase().includes(String(m.account_name ?? "").toLowerCase())) return true
+        return false
+      }) ?? null
+    }
+
+    const agg = new Map<string, number>()
+    for (const r of rows) {
+      const mapping = findMapping(r.accountName)
+      if (!mapping) continue
+      const sign = mapping.sign_convention ?? 1
+      const amt = (Number(r.debit) - Number(r.credit)) * Number(sign)
+      const key = \`\${mapping.pl_category}||\${mapping.pl_line_item}\`
+      agg.set(key, (agg.get(key) ?? 0) + amt)
+    }
+
+    const inserts: any[] = []
+    for (const [key, amount] of agg.entries()) {
+      const [pl_category, pl_line_item] = key.split("||")
+      inserts.push({
+        trial_balance_id,
+        period: periodVal,
+        pl_category,
+        pl_line_item,
+        amount,
+      })
+    }
+
+    if (inserts.length === 0) {
+      await supabase.from("pl_results").insert([{
+        trial_balance_id,
+        period: periodVal,
+        pl_category: "Unmapped",
+        pl_line_item: "Unmapped Lines",
+        amount: rows.reduce((s, r) => s + (Number(r.debit) - Number(r.credit)), 0),
+      }])
+      return
+    }
+
+    if (trial_balance_id) {
+      await supabase.from("pl_results").delete().eq("trial_balance_id", trial_balance_id)
+    } else {
+      await supabase.from("pl_results").delete().eq("period", periodVal)
+    }
+
+    const { error: plErr } = await supabase.from("pl_results").insert(inserts)
+    if (plErr) console.warn("pl_results insert error:", plErr)
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white p-10 font-mono flex items-center justify-center">
-      <div className="max-w-xl w-full border border-gray-800 p-10 rounded-3xl bg-gray-900/50 shadow-2xl backdrop-blur-sm">
-        <h1 className="text-3xl font-black mb-8 text-center bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">BNB ADMIN PORTAL</h1>
+    <div className="min-h-screen p-8 bg-black text-white">
+      <div className="max-w-3xl mx-auto">
+        <h1 className="text-3xl font-black mb-6">Admin Portal</h1>
 
-        <div className="space-y-6">
-          <div>
-            <label className="text-[10px] text-gray-500 uppercase tracking-widest mb-2 block font-bold">Month & Year</label>
-            <input 
-              type="text" 
-              value={period} 
-              onChange={e => setPeriod(e.target.value)} 
-              placeholder="March 2026"
-              className="w-full bg-black border border-gray-800 rounded-xl p-4 outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all text-lg"
-            />
-          </div>
+        <label className="block mb-2 text-sm text-gray-400">PERIOD NAME</label>
+        <input value={period} onChange={(e) => setPeriod(e.target.value)} placeholder="March 2026" className="w-full bg-black border border-gray-800 rounded-xl p-3 mb-4" />
 
-          <div>
-            <label className="text-[10px] text-gray-500 uppercase tracking-widest mb-2 block font-bold">Upload Trial Balance (.xlsx)</label>
-            <div className="border-2 border-dashed border-gray-800 rounded-xl p-8 text-center hover:border-gray-700 transition-all group">
-              <input type="file" onChange={handleFileUpload} className="cursor-pointer text-sm text-gray-500 w-full" />
-            </div>
-          </div>
+        <label className="block mb-2 text-sm text-gray-400">Upload Trial Balance (.xlsx)</label>
+        <input type="file" accept=".xlsx,.xls" onChange={handleFileUpload} className="mb-4" />
 
-          <button 
-            onClick={uploadToDatabase}
-            className="w-full bg-white text-black font-black py-5 rounded-2xl hover:bg-indigo-400 hover:text-white transition-all transform active:scale-[0.98] uppercase text-lg shadow-lg shadow-white/5"
-          >
-            Run Financial Generator
+        <div className="mb-4">
+          <button onClick={uploadToDatabase} disabled={isUploading} className="px-6 py-3 bg-white text-black rounded-2xl font-bold">
+            {isUploading ? "Uploading..." : "Upload & Generate P&L"}
           </button>
         </div>
 
-        {status && (
-          <div className={`mt-8 p-5 rounded-2xl text-center font-bold text-sm border ${
-            status.includes('SUCCESS') ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-400'
-          }`}>
-            {status}
-          </div>
-        )}
+        {status && <div className="p-3 rounded-lg bg-gray-900/40 mb-4">{status}</div>}
 
-        {logs.length > 0 && (
-          <div className="mt-6 space-y-2 p-4 bg-black/50 rounded-xl max-h-40 overflow-y-auto">
-            {logs.map((l, i) => (
-              <div key={i} className={`text-[10px] uppercase tracking-tighter ${l.includes('❌') ? 'text-red-400 font-bold' : 'text-gray-500'}`}>
-                {l}
-              </div>
-            ))}
+        {previewRows.length > 0 && (
+          <div className="bg-gray-900 rounded-xl p-4">
+            <div className="text-sm text-gray-400 mb-2">Preview (first 20 rows)</div>
+            <table className="w-full text-left">
+              <thead>
+                <tr className="text-xs text-gray-500">
+                  <th className="p-2">Account</th>
+                  <th className="p-2 text-right">Debit</th>
+                  <th className="p-2 text-right">Credit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {previewRows.slice(0, 20).map((r, i) => (
+                  <tr key={i} className="odd:bg-black/0 even:bg-white/2">
+                    <td className="p-2">{r.accountName}</td>
+                    <td className="p-2 text-right">{r.debit.toFixed(2)}</td>
+                    <td className="p-2 text-right">{r.credit.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

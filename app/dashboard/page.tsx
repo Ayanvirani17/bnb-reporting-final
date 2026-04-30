@@ -1,8 +1,8 @@
+cat > app/dashboard/page.tsx <<'EOF'
 "use client"
 
 import React, { useEffect, useState } from "react"
 import { getSupabaseClient } from "@/lib/supabaseClient"
-const supabase = getSupabaseClient()
 
 type PLRow = {
   id?: string
@@ -28,7 +28,7 @@ export default function DashboardPage() {
       const { data } = await supabase.from("pl_results").select("period")
       const unique = Array.from(new Set((data ?? []).map((d: any) => d.period))).sort().reverse()
       setPeriods(unique)
-      if (unique.length > 0) setSelectedPeriod((p) => p || unique[0])
+      if (unique.length > 0 && !selectedPeriod) setSelectedPeriod(unique[0])
     }
     fetchPeriods()
   }, [])
@@ -43,7 +43,7 @@ export default function DashboardPage() {
         setLoading(false)
         return
       }
-      const { data, error } = await supabase.from("pl_results").select("*").eq("period", selectedPeriod)
+      const { data, error } = await supabase.from("pl_results").select("*").eq("period", selectedPeriod).order("pl_category", { ascending: true })
       if (error) {
         console.error(error)
         setRows([])
@@ -60,11 +60,7 @@ export default function DashboardPage() {
       <div className="max-w-4xl mx-auto">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-4xl font-black">BNB FINANCIALS</h1>
-          <select
-            value={selectedPeriod}
-            onChange={(e) => setSelectedPeriod(e.target.value)}
-            className="bg-gray-900 border border-gray-800 p-2 rounded-lg"
-          >
+          <select value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)} className="bg-gray-900 border border-gray-800 p-2 rounded-lg">
             {periods.map((p) => (
               <option key={p} value={p}>
                 {p}
@@ -88,7 +84,7 @@ export default function DashboardPage() {
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={`${r.pl_category}-${r.pl_line_item}`} className="border-t border-gray-800">
+                  <tr key={\`\${r.pl_category}-\${r.pl_line_item}\`} className="border-t border-gray-800">
                     <td className="p-4">
                       <div className="text-xs text-indigo-400 uppercase font-bold">{r.pl_category}</div>
                       <div className="text-lg">{r.pl_line_item}</div>
@@ -106,3 +102,4 @@ export default function DashboardPage() {
     </div>
   )
 }
+EOF
