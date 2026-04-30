@@ -1,8 +1,3 @@
-# create new branch (safe)
-git switch -c fix/dashboard-syntax-3
-
-# overwrite the file (this will create/replace the file)
-cat > app/dashboard/page.tsx <<'TSX'
 "use client";
 
 import { useEffect, useState } from "react";
@@ -216,4 +211,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-TSX
