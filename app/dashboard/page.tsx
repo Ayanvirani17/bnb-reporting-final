@@ -1,103 +1,178 @@
-"use client"
+"use client";
 
-import React, { useEffect, useState } from "react"
-import { getSupabaseClient } from "@/lib/supabaseClient"
+import { useEffect, useState } from "react";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"; // or your supabase client import
+import { Database } from "@/lib/supabaseTypes"; // optional: if you have typed DB
+import { format as formatDate } from "date-fns";
 
-type PLRow = {
-  id?: string
-  period: string
-  pl_category: string
-  pl_line_item: string
-  amount: number
+const supabase = createClientComponentClient<Database>(); // or import your client
+
+function formatCurrency(n: number) {
+  return n === null || n === undefined
+    ? "-"
+    : n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 }
 
 export default function DashboardPage() {
-  const [periods, setPeriods] = useState<string[]>([])
-  const [selectedPeriod, setSelectedPeriod] = useState<string>("")
-  const [rows, setRows] = useState<PLRow[]>([])
-  const [loading, setLoading] = useState(false)
+  const [trialBalances, setTrialBalances] = useState<{ id: string; period_name: string }[]>([]);
+  const [selectedTbId, setSelectedTbId] = useState<string | null>(null);
+  const [plRows, setPlRows] = useState<
+    { pl_category: string; pl_line_item: string; amount: number | null }[]
+  >([]);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const fetchPeriods = async () => {
-      const supabase = getSupabaseClient()
-      if (!supabase) {
-        console.warn("Supabase not available")
-        return
-      }
-      const { data } = await supabase.from("pl_results").select("period")
-      const unique = Array.from(new Set((data ?? []).map((d: any) => d.period))).sort().reverse()
-      setPeriods(unique)
-      if (unique.length > 0 && !selectedPeriod) setSelectedPeriod(unique[0])
-    }
-    fetchPeriods()
-  }, [])
-
-  useEffect(() => {
-    if (!selectedPeriod) return
-    const fetchData = async () => {
-      setLoading(true)
-      const supabase = getSupabaseClient()
-      if (!supabase) {
-        setRows([])
-        setLoading(false)
-        return
-      }
-      const { data, error } = await supabase.from("pl_results").select("*").eq("period", selectedPeriod).order("pl_category", { ascending: true })
+    // load available periods
+    (async () => {
+      const { data, error } = await supabase
+        .from("trial_balances")
+        .select("id, period_name, created_at")
+        .order("created_at", { ascending: false })
+        .limit(50);
       if (error) {
-        console.error(error)
-        setRows([])
-      } else {
-        setRows((data ?? []) as PLRow[])
+        console.error("load TBs error", error);
+        return;
       }
-      setLoading(false)
-    }
-    fetchData()
-  }, [selectedPeriod])
+      setTrialBalances((data || []).map((r: any) => ({ id: r.id, period_name: r.period_name })));
+      if (data && data.length > 0) setSelectedTbId(data[0].id);
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!selectedTbId) return;
+    setLoading(true);
+    (async () => {
+      const { data, error } = await supabase
+        .from("pl_results")
+        .select("pl_category,pl_line_item,amount")
+        .eq("trial_balance_id", selectedTbId)
+        .order("pl_category", { ascending: true })
+        .order("pl_line_item", { ascending: true });
+
+      if (error) {
+        console.error("fetch pl_results error", error);
+        setPlRows([]);
+        setLoading(false);
+        return;
+      }
+      setPlRows((data || []).map((r: any) => ({ pl_category: r.pl_category, pl_line_item: r.pl_line_item, amount: r.amount })));
+      setLoading(false);
+    })();
+  }, [selectedTbId]);
+
+  // Aggregate by category and compute derived totals
+  const grouped = plRows.reduce<Record<string, { lines: { item: string; amount: number }[]; total: number }>>((acc, r) => {
+    const cat = r.pl_category || "Uncategorized";
+    const amt = Number(r.amount || 0);
+    if (!acc[cat]) acc[cat] = { lines: [], total: 0 };
+    acc[cat].lines.push({ item: r.pl_line_item || "Unnamed", amount: amt });
+    acc[cat].total += amt;
+    return acc;
+  }, {});
+
+  const revenue = grouped["Revenue"]?.total ?? 0;
+  const cogs = grouped["COGS"]?.total ?? 0;
+  const variable = grouped["Variable Cost"]?.total ?? 0;
+  const opex = grouped["Opex"]?.total ?? 0;
+  const nonOpex = grouped["Non Opex"]?.total ?? 0;
+  const finance = grouped["Non Opex"]?.lines?.find(l => /finance/i.test(l.item))?.amount ?? grouped["Finance"]?.total ?? 0;
+  // Derived calculations (adjust as your accounting rules require)
+  const grossProfit = revenue - cogs;
+  const contribution = grossProfit - variable;
+  const operatingProfit = contribution - opex; // or grossProfit - (variable + opex)
+  const preTax = operatingProfit + nonOpex - (finance || 0); // if nonOpex is positive, adjust sign rules as needed
+  const netIncome = preTax; // simplification (taxes not included)
+
+  const sectionsOrder = [
+    "Revenue",
+    "COGS",
+    "Variable Cost",
+    "Opex",
+    "Non Opex",
+    "Other"
+  ];
 
   return (
-    <div className="min-h-screen p-10 bg-black text-white">
-      <div className="max-w-4xl mx-auto">
-        <div className="flex justify-between items-center mb-8">
-          <h1 className="text-4xl font-black">BNB FINANCIALS</h1>
-          <select value={selectedPeriod} onChange={(e) => setSelectedPeriod(e.target.value)} className="bg-gray-900 border border-gray-800 p-2 rounded-lg">
-            {periods.map((p) => (
-              <option key={p} value={p}>
-                {p}
+    <div className="p-6 max-w-4xl mx-auto">
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Profit & Loss</h1>
+
+        <div>
+          <label className="mr-2">Period</label>
+          <select
+            value={selectedTbId ?? ""}
+            onChange={(e) => setSelectedTbId(e.target.value)}
+            className="px-3 py-1 rounded border"
+          >
+            {trialBalances.map(tb => (
+              <option key={tb.id} value={tb.id}>
+                {tb.period_name}
               </option>
             ))}
           </select>
         </div>
-
-        <div className="bg-gray-900 rounded-2xl p-4">
-          {loading ? (
-            <div className="text-gray-400">Loading...</div>
-          ) : rows.length === 0 ? (
-            <div className="text-gray-500 italic">No data found for this period.</div>
-          ) : (
-            <table className="w-full">
-              <thead>
-                <tr className="text-xs text-gray-500 uppercase">
-                  <th className="p-4">Category</th>
-                  <th className="p-4 text-right">Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={`${r.pl_category}-${r.pl_line_item}`} className="border-t border-gray-800">
-                    <td className="p-4">
-                      <div className="text-xs text-indigo-400 uppercase font-bold">{r.pl_category}</div>
-                      <div className="text-lg">{r.pl_line_item}</div>
-                    </td>
-                    <td className="p-4 text-right font-mono text-xl">
-                      {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(r.amount))}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
       </div>
-    </div>
-  )
-}
+
+      {loading ? (
+        <div>Loading...</div>
+      ) : (
+        <>
+          {/* Revenue */}
+          <section className="mb-4">
+            <h2 className="text-sm text-indigo-300 uppercase">Revenue</h2>
+            <div className="bg-slate-800 rounded divide-y">
+              {(grouped["Revenue"]?.lines || []).map(line => (
+                <div key={line.item} className="flex justify-between px-4 py-3">
+                  <div>{line.item}</div>
+                  <div className="font-medium">{formatCurrency(line.amount)}</div>
+                </div>
+              ))}
+              <div className="flex justify-between px-4 py-3 font-semibold">
+                <div>Total Revenue</div>
+                <div>{formatCurrency(revenue)}</div>
+              </div>
+            </div>
+          </section>
+
+          {/* COGS */}
+          <section className="mb-4">
+            <h2 className="text-sm text-indigo-300 uppercase">Cost of Goods Sold</h2>
+            <div className="bg-slate-800 rounded divide-y">
+              {(grouped["COGS"]?.lines || []).map(line => (
+                <div key={line.item} className="flex justify-between px-4 py-3">
+                  <div>{line.item}</div>
+                  <div className="font-medium">{formatCurrency(line.amount)}</div>
+                </div>
+              ))}
+              <div className="flex justify-between px-4 py-3 font-semibold">
+                <div>Total COGS</div>
+                <div>{formatCurrency(cogs)}</div>
+              </div>
+            </div>
+          </section>
+
+          {/* Gross Profit */}
+          <div className="mb-6 px-4 py-3 bg-slate-900 rounded flex justify-between items-center">
+            <div className="text-sm text-indigo-300 uppercase">Gross Profit</div>
+            <div className="text-lg font-bold">{formatCurrency(grossProfit)}</div>
+          </div>
+
+          {/* Variable costs */}
+          <section className="mb-4">
+            <h2 className="text-sm text-indigo-300 uppercase">Variable Costs</h2>
+            <div className="bg-slate-800 rounded divide-y">
+              {(grouped["Variable Cost"]?.lines || []).map(line => (
+                <div key={line.item} className="flex justify-between px-4 py-3">
+                  <div>{line.item}</div>
+                  <div className="font-medium">{formatCurrency(line.amount)}</div>
+                </div>
+              ))}
+              <div className="flex justify-between px-4 py-3 font-semibold">
+                <div>Total Variable Costs</div>
+                <div>{formatCurrency(variable)}</div>
+              </div>
+            </div>
+          </section>
+
+          {/* Contribution */}
+          <div className="mb-6 px-4 py-3 bg-slat
