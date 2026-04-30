@@ -1,16 +1,16 @@
+# create new branch (safe)
+git switch -c fix/dashboard-syntax-3
+
+# overwrite the file (this will create/replace the file)
+cat > app/dashboard/page.tsx <<'TSX'
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"; // or your supabase client import
-import { Database } from "@/lib/supabaseTypes"; // optional: if you have typed DB
-import { format as formatDate } from "date-fns";
+import supabase from "@/lib/supabaseClient";
 
-const supabase = createClientComponentClient<Database>(); // or import your client
-
-function formatCurrency(n: number) {
-  return n === null || n === undefined
-    ? "-"
-    : n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+function formatCurrency(n: number | null | undefined) {
+  if (n === null || n === undefined) return "-";
+  return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 }
 
 export default function DashboardPage() {
@@ -22,7 +22,6 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // load available periods
     (async () => {
       const { data, error } = await supabase
         .from("trial_balances")
@@ -60,7 +59,6 @@ export default function DashboardPage() {
     })();
   }, [selectedTbId]);
 
-  // Aggregate by category and compute derived totals
   const grouped = plRows.reduce<Record<string, { lines: { item: string; amount: number }[]; total: number }>>((acc, r) => {
     const cat = r.pl_category || "Uncategorized";
     const amt = Number(r.amount || 0);
@@ -75,22 +73,11 @@ export default function DashboardPage() {
   const variable = grouped["Variable Cost"]?.total ?? 0;
   const opex = grouped["Opex"]?.total ?? 0;
   const nonOpex = grouped["Non Opex"]?.total ?? 0;
-  const finance = grouped["Non Opex"]?.lines?.find(l => /finance/i.test(l.item))?.amount ?? grouped["Finance"]?.total ?? 0;
-  // Derived calculations (adjust as your accounting rules require)
   const grossProfit = revenue - cogs;
   const contribution = grossProfit - variable;
-  const operatingProfit = contribution - opex; // or grossProfit - (variable + opex)
-  const preTax = operatingProfit + nonOpex - (finance || 0); // if nonOpex is positive, adjust sign rules as needed
-  const netIncome = preTax; // simplification (taxes not included)
-
-  const sectionsOrder = [
-    "Revenue",
-    "COGS",
-    "Variable Cost",
-    "Opex",
-    "Non Opex",
-    "Other"
-  ];
+  const operatingProfit = contribution - opex;
+  const preTax = operatingProfit + nonOpex;
+  const netIncome = preTax;
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -175,4 +162,58 @@ export default function DashboardPage() {
           </section>
 
           {/* Contribution */}
-          <div className="mb-6 px-4 py-3 bg-slat
+          <div className="mb-6 px-4 py-3 bg-slate-900 rounded flex justify-between items-center">
+            <div className="text-sm text-indigo-300 uppercase">Contribution</div>
+            <div className="text-lg font-bold">{formatCurrency(contribution)}</div>
+          </div>
+
+          {/* Opex */}
+          <section className="mb-4">
+            <h2 className="text-sm text-indigo-300 uppercase">Operating Expenses</h2>
+            <div className="bg-slate-800 rounded divide-y">
+              {(grouped["Opex"]?.lines || []).map(line => (
+                <div key={line.item} className="flex justify-between px-4 py-3">
+                  <div>{line.item}</div>
+                  <div className="font-medium">{formatCurrency(line.amount)}</div>
+                </div>
+              ))}
+              <div className="flex justify-between px-4 py-3 font-semibold">
+                <div>Total Opex</div>
+                <div>{formatCurrency(opex)}</div>
+              </div>
+            </div>
+          </section>
+
+          {/* Operating profit */}
+          <div className="mb-6 px-4 py-3 bg-slate-900 rounded flex justify-between items-center">
+            <div className="text-sm text-indigo-300 uppercase">Operating Profit (EBITDA)</div>
+            <div className="text-lg font-bold">{formatCurrency(operatingProfit)}</div>
+          </div>
+
+          {/* Non-Op & Finance */}
+          <section className="mb-4">
+            <h2 className="text-sm text-indigo-300 uppercase">Non-operating / Finance</h2>
+            <div className="bg-slate-800 rounded divide-y">
+              {(grouped["Non Opex"]?.lines || []).map(line => (
+                <div key={line.item} className="flex justify-between px-4 py-3">
+                  <div>{line.item}</div>
+                  <div className="font-medium">{formatCurrency(line.amount)}</div>
+                </div>
+              ))}
+              <div className="flex justify-between px-4 py-3 font-semibold">
+                <div>Total Non-Op</div>
+                <div>{formatCurrency(nonOpex)}</div>
+              </div>
+            </div>
+          </section>
+
+          <div className="mb-6 px-4 py-3 bg-slate-900 rounded flex justify-between items-center">
+            <div className="text-sm text-indigo-300 uppercase">Net Income (Approx)</div>
+            <div className="text-lg font-bold">{formatCurrency(netIncome)}</div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+TSX
