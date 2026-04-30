@@ -84,7 +84,7 @@ export default function DashboardPage() {
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={\`\${r.pl_category}-\${r.pl_line_item}\`} className="border-t border-gray-800">
+                  <tr key={`${r.pl_category}-${r.pl_line_item}`} className="border-t border-gray-800">
                     <td className="p-4">
                       <div className="text-xs text-indigo-400 uppercase font-bold">{r.pl_category}</div>
                       <div className="text-lg">{r.pl_line_item}</div>
