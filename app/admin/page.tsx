@@ -33,30 +33,55 @@ export default function AdminPage() {
         const workbook = XLSX.read(data as ArrayBuffer, { type: "array" })
         const sheet = workbook.Sheets[workbook.SheetNames[0]]
 
-        // Try header at row 6 (range:5) — this worked for your sample earlier
-        // We also keep the raw rows so you can see what the sheet_to_json returned
+        // Use range:5 because your header is on row 6 (0-indexed)
         const rows: any[] = XLSX.utils.sheet_to_json(sheet, { range: 5, defval: "" })
+
+        // Save raw for debug view
         setRawRows(rows.slice(0, 50))
         setRawKeys(Object.keys(rows[0] ?? {}))
 
-        // Flexible parsing for many header variants
-        const parsed: PreviewRow[] = rows
+        // If the first returned row looks like a header row (contains words like Account / Debit / Credit),
+        // use it to detect which internal key (e.g., __EMPTY, __EMPTY_2, ...) maps to which column,
+        // then drop that header row from the data before parsing.
+        let dataRows = rows
+        let accountKey: string | null = null
+        let debitKey: string | null = null
+        let creditKey: string | null = null
+
+        if (rows.length > 0) {
+          const headerRow = rows[0]
+          const headerValues = Object.values(headerRow).map((v: any) => String(v ?? "").trim().toLowerCase())
+
+          const looksLikeHeader =
+            headerValues.some((v: string) => /account|acct|description|name/.test(v)) ||
+            headerValues.some((v: string) => /debit|dr/.test(v)) ||
+            headerValues.some((v: string) => /credit|cr/.test(v))
+
+          if (looksLikeHeader) {
+            // find keys by matching header values
+            for (const k of Object.keys(headerRow)) {
+              const hv = String(headerRow[k] ?? "").trim().toLowerCase()
+              if (!accountKey && /account|acct|description|name/.test(hv)) accountKey = k
+              if (!debitKey && /debit|dr/.test(hv)) debitKey = k
+              if (!creditKey && /credit|cr/.test(hv)) creditKey = k
+            }
+            // drop header row from data
+            dataRows = rows.slice(1)
+          }
+        }
+
+        // Fallback: if we didn't find keys from headerRow, try to infer keys from data row keys
+        const sampleKeys = Object.keys(rows[0] ?? {})
+        if (!accountKey) accountKey = sampleKeys.find(k => /acc|account|desc|name/i.test(k)) ?? null
+        if (!debitKey) debitKey = sampleKeys.find(k => /deb|dr|amount/i.test(k)) ?? null
+        if (!creditKey) creditKey = sampleKeys.find(k => /cred|cr|amount/i.test(k)) ?? null
+
+        // Now parse using the detected keys
+        const parsed: PreviewRow[] = dataRows
           .map((r) => {
-            // Look for common header name variants
-            const accountName =
-              String(
-                r["Account Name"] ??
-                r["Account"] ??
-                r["AccountName"] ??
-                r["Description"] ??
-                r["Account description"] ??
-                r["Account Title"] ??
-                ""
-              ).trim()
-
-            const debit = Number(r["Debit"] ?? r["Dr"] ?? r["Debit Amount"] ?? r["DebitAmount"] ?? 0) || 0
-            const credit = Number(r["Credit"] ?? r["Cr"] ?? r["Credit Amount"] ?? r["CreditAmount"] ?? 0) || 0
-
+            const accountName = String((accountKey ? r[accountKey] : r["Account Name"] ?? r["Account"] ?? r["Description"]) ?? "").trim()
+            const debit = Number(debitKey ? r[debitKey] : r["Debit"] ?? r["Dr"] ?? 0) || 0
+            const credit = Number(creditKey ? r[creditKey] : r["Credit"] ?? r["Cr"] ?? 0) || 0
             return { accountName, debit, credit }
           })
           .filter((r) =>
@@ -66,6 +91,7 @@ export default function AdminPage() {
             (r.debit !== 0 || r.credit !== 0)
           )
 
+        // Save parsed preview and status
         setPreviewRows(parsed)
         setStatus(`Parsed ${parsed.length} rows from ${file.name}`)
       } catch (err: any) {
