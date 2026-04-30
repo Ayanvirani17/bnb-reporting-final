@@ -120,7 +120,7 @@ export default function AdminPage() {
       setStatus("Creating trial balance record...")
       const { data: tbData, error: tbError } = await supabase
         .from("trial_balances")
-        .insert([{ period, created_at: new Date().toISOString() }])
+        .insert([{ period }])
         .select()
         .limit(1)
       if (tbError) throw tbError
