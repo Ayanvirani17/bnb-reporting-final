@@ -10,7 +10,7 @@ type PreviewRow = {
   credit: number
 }
 
-export default function AdminPage() {
+export default function AdminPage(): JSX.Element {
   const [period, setPeriod] = useState<string>("")
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([])
   const [status, setStatus] = useState<string>("")
@@ -21,31 +21,59 @@ export default function AdminPage() {
     if (!file) return
     setStatus(`Reading ${file.name}...`)
     const reader = new FileReader()
-    reader.onload = (evt) => {
+
+    reader.onload = (evt: ProgressEvent<FileReader>) => {
       try {
         const data = evt.target?.result
         if (!data) throw new Error("No file data")
-        const workbook = XLSX.read(data, { type: "array" })
+        // XLSX.read accepts ArrayBuffer, so pass through
+        const workbook = XLSX.read(data as ArrayBuffer, { type: "array" })
         const sheet = workbook.Sheets[workbook.SheetNames[0]]
 
         // Header is on row 6 in your sample -> range: 5 (0-based)
         const rows: any[] = XLSX.utils.sheet_to_json(sheet, { range: 5, defval: "" })
 
         const parsed: PreviewRow[] = rows
-          .map((r) => ({
-            accountName: String(r["Account Name"] ?? r["Account"] ?? "").trim(),
-            debit: Number(r["Debit"] ?? 0) || 0,
-            credit: Number(r["Credit"] ?? 0) || 0,
-          }))
-          .filter((r) => r.accountName && !/total/i.test(r.accountName) && r.accountName.toLowerCase() !== "difference")
+          .map((r) => {
+            // Flexible header matching: look for common variants
+            const accountName = String(
+              r["Account Name"] ??
+              r["Account"] ??
+              r["AccountName"] ??
+              r["Description"] ??
+              r["Account description"] ??
+              ""
+            ).trim()
+
+            const debit = Number(r["Debit"] ?? r["Dr"] ?? r["Debit Amount"] ?? 0) || 0
+            const credit = Number(r["Credit"] ?? r["Cr"] ?? r["Credit Amount"] ?? 0) || 0
+
+            return { accountName, debit, credit }
+          })
+          .filter((r) =>
+            Boolean(r.accountName) &&
+            !/total/i.test(r.accountName) &&
+            r.accountName.toLowerCase() !== "difference" &&
+            (r.debit !== 0 || r.credit !== 0) // ignore empty rows
+          )
+
+        // Debug log so you can inspect in browser console
+        // (open DevTools Console and watch this on upload)
+        console.debug("Parsed preview rows:", parsed)
 
         setPreviewRows(parsed)
         setStatus(`Parsed ${parsed.length} rows from ${file.name}`)
       } catch (err: any) {
         console.error(err)
-        setStatus("Failed to parse file: " + (err?.message ?? err))
+        setStatus("Failed to parse file: " + (err?.message ?? String(err)))
       }
     }
+
+    reader.onerror = (err) => {
+      console.error("File read error", err)
+      setStatus("File read error")
+    }
+
     reader.readAsArrayBuffer(file)
   }
 
@@ -54,7 +82,7 @@ export default function AdminPage() {
     if (previewRows.length === 0) return setStatus("No rows to upload — please upload and preview a file first.")
 
     const supabase = getSupabaseClient()
-    if (!supabase) return setStatus("Supabase client not available. Check env vars in Vercel.")
+    if (!supabase) return setStatus("Supabase client not available. Check env vars in Vercel / local .env.local")
 
     try {
       setIsUploading(true)
@@ -92,6 +120,7 @@ export default function AdminPage() {
   }
 
   async function generatePLFromLines(supabase: any, trial_balance_id: string | null, periodVal: string, rows: PreviewRow[]) {
+    // Fetch mapping table
     const { data: mappings, error: mapErr } = await supabase.from("account_mapping").select("*")
     if (mapErr) {
       console.warn("account_mapping fetch error:", mapErr)
@@ -99,11 +128,15 @@ export default function AdminPage() {
 
     function findMapping(accountName: string) {
       if (!mappings) return null
-      return mappings.find((m: any) => {
-        if (m.account_code && String(m.account_code) === String(accountName)) return true
-        if (!m.account_code && accountName.toLowerCase().includes(String(m.account_name ?? "").toLowerCase())) return true
-        return false
-      }) ?? null
+      // Try exact account_code match first, then simple name contains match
+      return (
+        mappings.find((m: any) => m.account_code && String(m.account_code) === String(accountName)) ||
+        mappings.find((m: any) => {
+          if (!m.account_name) return false
+          return accountName.toLowerCase().includes(String(m.account_name).toLowerCase())
+        }) ||
+        null
+      )
     }
 
     const agg = new Map<string, number>()
@@ -129,6 +162,7 @@ export default function AdminPage() {
     }
 
     if (inserts.length === 0) {
+      // If nothing matched, insert an "Unmapped" placeholder so user can see totals
       await supabase.from("pl_results").insert([{
         trial_balance_id,
         period: periodVal,
@@ -139,6 +173,7 @@ export default function AdminPage() {
       return
     }
 
+    // Remove previous results for this trial_balance / period
     if (trial_balance_id) {
       await supabase.from("pl_results").delete().eq("trial_balance_id", trial_balance_id)
     } else {
@@ -155,13 +190,22 @@ export default function AdminPage() {
         <h1 className="text-3xl font-black mb-6">Admin Portal</h1>
 
         <label className="block mb-2 text-sm text-gray-400">PERIOD NAME</label>
-        <input value={period} onChange={(e) => setPeriod(e.target.value)} placeholder="March 2026" className="w-full bg-black border border-gray-800 rounded-xl p-3 mb-4" />
+        <input
+          value={period}
+          onChange={(e) => setPeriod(e.target.value)}
+          placeholder="March 2026"
+          className="w-full bg-black border border-gray-800 rounded-xl p-3 mb-4"
+        />
 
-        <label className="block mb-2 text-sm text-gray-400">Upload Trial Balance (.xlsx)</label>
-        <input type="file" accept=".xlsx,.xls" onChange={handleFileUpload} className="mb-4" />
+        <label className="block mb-2 text-sm text-gray-400">Upload Trial Balance (.xlsx / .xls)</label>
+        <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFileUpload} className="mb-4" />
 
         <div className="mb-4">
-          <button onClick={uploadToDatabase} disabled={isUploading} className="px-6 py-3 bg-white text-black rounded-2xl font-bold">
+          <button
+            onClick={uploadToDatabase}
+            disabled={isUploading}
+            className="px-6 py-3 bg-white text-black rounded-2xl font-bold"
+          >
             {isUploading ? "Uploading..." : "Upload & Generate P&L"}
           </button>
         </div>
