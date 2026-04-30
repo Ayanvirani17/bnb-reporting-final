@@ -16,6 +16,10 @@ export default function AdminPage() {
   const [status, setStatus] = useState<string>("")
   const [isUploading, setIsUploading] = useState(false)
 
+  // Debug-only states (temporary)
+  const [rawRows, setRawRows] = useState<any[]>([])
+  const [rawKeys, setRawKeys] = useState<string[]>([])
+
   function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -26,27 +30,32 @@ export default function AdminPage() {
       try {
         const data = evt.target?.result
         if (!data) throw new Error("No file data")
-        // XLSX.read accepts ArrayBuffer, so pass through
         const workbook = XLSX.read(data as ArrayBuffer, { type: "array" })
         const sheet = workbook.Sheets[workbook.SheetNames[0]]
 
-        // Header is on row 6 in your sample -> range: 5 (0-based)
+        // Try header at row 6 (range:5) — this worked for your sample earlier
+        // We also keep the raw rows so you can see what the sheet_to_json returned
         const rows: any[] = XLSX.utils.sheet_to_json(sheet, { range: 5, defval: "" })
+        setRawRows(rows.slice(0, 50))
+        setRawKeys(Object.keys(rows[0] ?? {}))
 
+        // Flexible parsing for many header variants
         const parsed: PreviewRow[] = rows
           .map((r) => {
-            // Flexible header matching: look for common variants
-            const accountName = String(
-              r["Account Name"] ??
-              r["Account"] ??
-              r["AccountName"] ??
-              r["Description"] ??
-              r["Account description"] ??
-              ""
-            ).trim()
+            // Look for common header name variants
+            const accountName =
+              String(
+                r["Account Name"] ??
+                r["Account"] ??
+                r["AccountName"] ??
+                r["Description"] ??
+                r["Account description"] ??
+                r["Account Title"] ??
+                ""
+              ).trim()
 
-            const debit = Number(r["Debit"] ?? r["Dr"] ?? r["Debit Amount"] ?? 0) || 0
-            const credit = Number(r["Credit"] ?? r["Cr"] ?? r["Credit Amount"] ?? 0) || 0
+            const debit = Number(r["Debit"] ?? r["Dr"] ?? r["Debit Amount"] ?? r["DebitAmount"] ?? 0) || 0
+            const credit = Number(r["Credit"] ?? r["Cr"] ?? r["Credit Amount"] ?? r["CreditAmount"] ?? 0) || 0
 
             return { accountName, debit, credit }
           })
@@ -54,12 +63,8 @@ export default function AdminPage() {
             Boolean(r.accountName) &&
             !/total/i.test(r.accountName) &&
             r.accountName.toLowerCase() !== "difference" &&
-            (r.debit !== 0 || r.credit !== 0) // ignore empty rows
+            (r.debit !== 0 || r.credit !== 0)
           )
-
-        // Debug log so you can inspect in browser console
-        // (open DevTools Console and watch this on upload)
-        console.debug("Parsed preview rows:", parsed)
 
         setPreviewRows(parsed)
         setStatus(`Parsed ${parsed.length} rows from ${file.name}`)
@@ -120,7 +125,6 @@ export default function AdminPage() {
   }
 
   async function generatePLFromLines(supabase: any, trial_balance_id: string | null, periodVal: string, rows: PreviewRow[]) {
-    // Fetch mapping table
     const { data: mappings, error: mapErr } = await supabase.from("account_mapping").select("*")
     if (mapErr) {
       console.warn("account_mapping fetch error:", mapErr)
@@ -128,7 +132,6 @@ export default function AdminPage() {
 
     function findMapping(accountName: string) {
       if (!mappings) return null
-      // Try exact account_code match first, then simple name contains match
       return (
         mappings.find((m: any) => m.account_code && String(m.account_code) === String(accountName)) ||
         mappings.find((m: any) => {
@@ -162,7 +165,6 @@ export default function AdminPage() {
     }
 
     if (inserts.length === 0) {
-      // If nothing matched, insert an "Unmapped" placeholder so user can see totals
       await supabase.from("pl_results").insert([{
         trial_balance_id,
         period: periodVal,
@@ -173,7 +175,6 @@ export default function AdminPage() {
       return
     }
 
-    // Remove previous results for this trial_balance / period
     if (trial_balance_id) {
       await supabase.from("pl_results").delete().eq("trial_balance_id", trial_balance_id)
     } else {
@@ -213,7 +214,7 @@ export default function AdminPage() {
         {status && <div className="p-3 rounded-lg bg-gray-900/40 mb-4">{status}</div>}
 
         {previewRows.length > 0 && (
-          <div className="bg-gray-900 rounded-xl p-4">
+          <div className="bg-gray-900 rounded-xl p-4 mb-6">
             <div className="text-sm text-gray-400 mb-2">Preview (first 20 rows)</div>
             <table className="w-full text-left">
               <thead>
@@ -235,6 +236,36 @@ export default function AdminPage() {
             </table>
           </div>
         )}
+
+        {/* DEBUG DUMP - TEMPORARY: shows raw sheet rows and parsed preview JSON */}
+        <div className="bg-white text-black rounded-xl p-4">
+          <div className="font-bold mb-2">Debug output (temporary)</div>
+
+          <div className="mb-2">
+            <div className="text-xs text-gray-600 mb-1">Raw sheet rows (first 30):</div>
+            {rawRows.length === 0 ? (
+              <div className="text-sm text-gray-500 italic">No raw rows captured yet (upload a file).</div>
+            ) : (
+              <pre className="text-xs max-h-40 overflow-auto p-2 bg-black text-white rounded">{JSON.stringify(rawRows, null, 2)}</pre>
+            )}
+          </div>
+
+          <div>
+            <div className="text-xs text-gray-600 mb-1">Detected sheet keys (first row):</div>
+            {rawKeys.length === 0 ? (
+              <div className="text-sm text-gray-500 italic">No keys yet</div>
+            ) : (
+              <div className="text-sm mb-2">{rawKeys.join(", ")}</div>
+            )}
+          </div>
+
+          <div>
+            <div className="text-xs text-gray-600 mb-1">Parsed preview rows (what will be uploaded):</div>
+            <pre className="text-sm max-h-40 overflow-auto p-2 bg-black text-white rounded">{JSON.stringify(previewRows.slice(0, 50), null, 2)}</pre>
+          </div>
+
+          <div className="text-xs text-gray-500 mt-2">When done debugging, remove this debug block.</div>
+        </div>
       </div>
     </div>
   )
