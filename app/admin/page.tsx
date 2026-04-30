@@ -10,7 +10,7 @@ type PreviewRow = {
   credit: number
 }
 
-export default function AdminPage(): JSX.Element {
+export default function AdminPage() {
   const [period, setPeriod] = useState<string>("")
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([])
   const [status, setStatus] = useState<string>("")
