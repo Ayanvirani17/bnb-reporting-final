@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react"
 import { getSupabaseClient } from "@/lib/supabaseClient"
+const supabase = getSupabaseClient()
 
 type PLRow = {
   id?: string

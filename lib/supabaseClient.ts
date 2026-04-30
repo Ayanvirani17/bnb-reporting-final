@@ -1,4 +1,4 @@
- // lib/supabaseClient.ts
+cat > lib/supabaseClient.ts <<'EOF'
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 /**
@@ -11,3 +11,4 @@ export function getSupabaseClient(): SupabaseClient | null {
   if (!url || !key) return null;
   return createClient(url, key);
 }
+EOF
