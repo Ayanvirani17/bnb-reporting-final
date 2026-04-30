@@ -1,4 +1,3 @@
-cat > app/dashboard/page.tsx <<'EOF'
 "use client"
 
 import React, { useEffect, useState } from "react"
@@ -102,4 +101,3 @@ export default function DashboardPage() {
     </div>
   )
 }
-EOF
