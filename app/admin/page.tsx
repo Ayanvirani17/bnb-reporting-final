@@ -19,7 +19,7 @@ export default function AdminPage() {
   function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    setStatus(\`Reading \${file.name}...\`)
+    setStatus(`Reading ${file.name}...`)
     const reader = new FileReader()
     reader.onload = (evt) => {
       try {
@@ -40,7 +40,7 @@ export default function AdminPage() {
           .filter((r) => r.accountName && !/total/i.test(r.accountName) && r.accountName.toLowerCase() !== "difference")
 
         setPreviewRows(parsed)
-        setStatus(\`Parsed \${parsed.length} rows from \${file.name}\`)
+        setStatus(`Parsed ${parsed.length} rows from ${file.name}`)
       } catch (err: any) {
         console.error(err)
         setStatus("Failed to parse file: " + (err?.message ?? err))
@@ -82,7 +82,7 @@ export default function AdminPage() {
       setStatus("Generating P&L...")
       await generatePLFromLines(supabase, trial_balance_id, period, previewRows)
 
-      setStatus(\`SUCCESS: P&L generated for \${period}\`)
+      setStatus(`SUCCESS: P&L generated for ${period}`)
     } catch (err: any) {
       console.error(err)
       setStatus("Upload failed: " + (err?.message ?? JSON.stringify(err)))
@@ -112,7 +112,7 @@ export default function AdminPage() {
       if (!mapping) continue
       const sign = mapping.sign_convention ?? 1
       const amt = (Number(r.debit) - Number(r.credit)) * Number(sign)
-      const key = \`\${mapping.pl_category}||\${mapping.pl_line_item}\`
+      const key = `${mapping.pl_category}||${mapping.pl_line_item}`
       agg.set(key, (agg.get(key) ?? 0) + amt)
     }
 
