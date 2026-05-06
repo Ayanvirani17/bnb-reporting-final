@@ -1,21 +1,14 @@
+// lib/supabaseClient.ts
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY env variables");
+if (!url || !anonKey) {
+  console.warn("Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local");
 }
 
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-/**
- * Named getter kept for any files that import { getSupabaseClient }
- * and for easier future testing.
- */
-export function getSupabaseClient() {
-  return supabase;
-}
-
-// Default export for files that import supabase as default
-export default supabase;
+// Named export used by client pages/components
+export const getSupabaseClient = () => {
+  return createClient(url, anonKey);
+};
