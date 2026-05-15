@@ -1,6 +1,6 @@
 // server/mapping.ts (example)
 import { createClient } from "@supabase/supabase-js";
-const supabase = getSupabaseServerClient();
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
 
 // Normalizes strings for matching
 function norm(s?: string) {
