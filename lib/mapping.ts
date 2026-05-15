@@ -33,7 +33,7 @@ export async function findOrCreateMapping(account_code?: string | null, account_
     const { data: byName } = await supabase
       .from("account_mapping")
       .select("*")
-      .ilike("account_name", account_name)
+      .ilike("account_name", account_name ?? "")
       .limit(1)
       .maybeSingle();
     if (byName) {
@@ -109,7 +109,7 @@ async function _insertAutoMapping(patternRow: any, account_code?: string|null, a
       if (existing) return existing;
     }
     if (account_name) {
-      const { data: existing2 } = await supabase.from("account_mapping").select("*").ilike("account_name", account_name).limit(1).maybeSingle();
+      const { data: existing2 } = await supabase.from("account_mapping").select("*").ilike("account_name", account_name ?? "").limit(1).maybeSingle();
       if (existing2) return existing2;
     }
 
