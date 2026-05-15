@@ -171,7 +171,7 @@ export default function AdminPage() {
         }
 
         // Insert P&L results
-        const { error: plError } = await supabase.from('pl_results').insert(plResults);
+        const { error: plError } = await supabase.from('pl_results').insert(plResults.filter((r): r is NonNullable<typeof r> => r !== null));
         if (plError) throw plError;
 
         setPreview({
