@@ -12,8 +12,8 @@ function norm(s?: string) {
  * Returns mapping row with id, statement_type, pl_category, mapping_confidence, etc.
  */
 export async function findOrCreateMapping(account_code?: string | null, account_name?: string | null) {
-  const code = norm(account_code);
-  const name = norm(account_name);
+  const code = norm(account_code ?? undefined);
+  const name = norm(account_name ?? undefined);
 
   // 1) exact code match in account_mapping
   if (code) {
