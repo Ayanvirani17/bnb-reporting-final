@@ -1,4 +1,3 @@
-cat > ~/Desktop/bnb-reporting/app/page.tsx << 'ENDOFFILE'
 "use client";
 import { useEffect, useState } from "react";
 
