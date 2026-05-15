@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { getSupabaseServer } from '../../../../lib/supabaseServer';
+import { getSupabaseServerClient } from '../../../../lib/supabaseServer';
 
 export async function GET(req: Request) {
   try {
-    const supabase = getSupabaseServer();
+    const supabase = getSupabaseServerClient();
     const { data, error } = await supabase
       .from("pl_results")
       .select("period")

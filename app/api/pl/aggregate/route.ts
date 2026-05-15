@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSupabaseServer } from '../../../../lib/supabaseServer';
+import { getSupabaseServerClient } from '../../../../lib/supabaseServer';
 
 export async function GET(req: Request) {
   try {
@@ -7,7 +7,7 @@ export async function GET(req: Request) {
     const periodA = url.searchParams.get("periodA") || "";
     const periodB = url.searchParams.get("periodB") || "";
 
-    const supabase = getSupabaseServer();
+    const supabase = getSupabaseServerClient();
     const periods = [periodA, periodB].filter(Boolean);
 
     const { data: rows, error } = await supabase
