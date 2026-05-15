@@ -1,0 +1,4 @@
+./app/api/pl/mapping/route.ts.tsx:3:const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+./replace_createclient.sh:9:grep -R --line-number --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=.git "createClient(" . > createclient_occurrences.txt || true
+./lib/supabaseClient.ts:13:  return createClient(url, anonKey);
+./lib/supabaseServer.ts:13:  return createClient(url, serviceRoleKey);

@@ -1,14 +1,12 @@
-// lib/supabaseClient.ts
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-if (!url || !anonKey) {
-  console.warn("Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local");
+// default client (can be used in client components)
+export const supabase: SupabaseClient = createClient(supabaseUrl, supabaseAnonKey);
+
+// helper to create a fresh client (for server/client usages that expect a factory)
+export function getSupabaseClient(): SupabaseClient {
+  return createClient(supabaseUrl, supabaseAnonKey);
 }
-
-// Named export used by client pages/components
-export const getSupabaseClient = () => {
-  return createClient(url, anonKey);
-};
