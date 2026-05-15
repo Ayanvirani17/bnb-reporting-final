@@ -22,7 +22,6 @@ export async function findOrCreateMapping(account_code?: string | null, account_
       .select("*")
       .eq("account_code", account_code)
       .limit(1)
-      .single()
       .maybeSingle();
     if (byCode) {
       return { ...byCode, mapping_confidence: byCode.mapping_confidence ?? 1, pattern_used: "exact_code" };
@@ -36,7 +35,6 @@ export async function findOrCreateMapping(account_code?: string | null, account_
       .select("*")
       .ilike("account_name", account_name)
       .limit(1)
-      .single()
       .maybeSingle();
     if (byName) {
       return { ...byName, mapping_confidence: byName.mapping_confidence ?? 1, pattern_used: "exact_name" };
